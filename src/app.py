@@ -3,59 +3,68 @@
 SEO Content Factory
 Revenue Target: $22K/month
 """
-
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import openai
+from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-openai.api_key = os.getenv("OPENAI_API_KEY", "")
+# OpenAI v1 client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
 
 app = Flask(__name__)
-CORS(app)
 
-# Mock functions (replace with real implementations)
-async def research_keywords(seed_keyword: str) -> List[str]:
+# Restrict CORS to known origins; override ALLOWED_ORIGINS in env for production
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"
+).split(",")
+CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=False)
+
+
+# Helper functions (synchronous - Flask 2.x supports async routes but requires asgiref)
+def research_keywords(seed_keyword: str) -> List[str]:
     """Research related keywords"""
     return [
         seed_keyword,
         f"{seed_keyword} for beginners",
         f"best {seed_keyword}",
         f"{seed_keyword} guide",
-        f"{seed_keyword} comparison"
+        f"{seed_keyword} comparison",
     ]
 
-async def generate_outline(keyword: str, word_count: int) -> Dict:
+
+def generate_outline(keyword: str, word_count: int) -> Dict:
     """Generate article outline"""
     sections = word_count // 200  # ~200 words per section
-    
+    all_sections = [
+        {"heading": "Introduction", "word_count": 200},
+        {"heading": f"What is {keyword.title()}?", "word_count": 300},
+        {"heading": f"Benefits of {keyword.title()}", "word_count": 400},
+        {"heading": "How to Get Started", "word_count": 500},
+        {"heading": "Best Practices", "word_count": 400},
+        {"heading": "Common Mistakes", "word_count": 300},
+        {"heading": "Conclusion", "word_count": 200},
+    ]
     return {
         "title": f"{keyword.title()}: Complete Guide (2026)",
-        "meta_description": f"Comprehensive guide to {keyword}. Expert tips, best practices, and actionable advice.",
-        "sections": [
-            {"heading": "Introduction", "word_count": 200},
-            {"heading": f"What is {keyword.title()}?", "word_count": 300},
-            {"heading": f"Benefits of {keyword.title()}", "word_count": 400},
-            {"heading": f"How to Get Started", "word_count": 500},
-            {"heading": "Best Practices", "word_count": 400},
-            {"heading": "Common Mistakes", "word_count": 300},
-            {"heading": "Conclusion", "word_count": 200}
-        ][:sections]
+        "meta_description": (
+            f"Comprehensive guide to {keyword}. Expert tips, best practices, and actionable advice."
+        ),
+        "sections": all_sections[:sections],
     }
 
-async def write_article(outline: Dict, tone: str) -> str:
-    """Generate article content with GPT-4"""
+
+def write_article(outline: Dict, tone: str) -> str:
+    """Generate article content with GPT-4 (OpenAI v1 client)"""
     system_prompt = f"""
 You are an expert content writer specializing in SEO-optimized articles.
 Write in a {tone} tone.
-
 Guidelines:
 - Natural, engaging writing
 - Clear structure with headers
@@ -64,16 +73,12 @@ Guidelines:
 - Optimize for featured snippets
 - Add FAQ section
 """
-
     user_prompt = f"""
 Write a complete article based on this outline:
-
 Title: {outline['title']}
 Target word count: {sum(s['word_count'] for s in outline['sections'])}
-
 Sections:
 {chr(10).join([f"- {s['heading']} ({s['word_count']} words)" for s in outline['sections']])}
-
 Include:
 - Introduction with hook
 - Clear H2/H3 structure
@@ -81,23 +86,23 @@ Include:
 - FAQ section (5 questions)
 - Strong conclusion with CTA
 """
-
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
             temperature=0.7,
-            max_tokens=4000
+            max_tokens=4000,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
     except Exception as e:
         logger.error(f"Content generation failed: {e}")
         return f"# {outline['title']}\n\nSample article content would be generated here..."
 
-@app.route('/')
+
+@app.route("/")
 def index():
     return jsonify({
         "service": "SEO Content Factory",
@@ -107,57 +112,67 @@ def index():
         "pricing": {
             "agency": "$399/month (50 articles)",
             "scale": "$799/month (200 articles)",
-            "white_label": "$1,999/month (unlimited)"
-        }
+            "white_label": "$1,999/month (unlimited)",
+        },
     })
 
-@app.route('/health')
+
+@app.route("/health")
 def health():
     return jsonify({
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "openai_configured": bool(openai.api_key)
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY", "")),
     })
 
-@app.route('/api/v1/generate', methods=['POST'])
+
+@app.route("/api/v1/generate", methods=["POST"])
 def generate_article():
     """Generate SEO-optimized article"""
     try:
-        data = request.json
-        seed_keyword = data.get('seed_keyword')
-        word_count = data.get('word_count', 2000)
-        tone = data.get('tone', 'professional')
-        
+        data = request.get_json(silent=True) or {}
+        seed_keyword = data.get("seed_keyword")
+        if not seed_keyword:
+            return jsonify({"error": "seed_keyword is required"}), 400
+
+        word_count = int(data.get("word_count", 2000))
+        tone = data.get("tone", "professional")
+
         logger.info(f"Generating article for: {seed_keyword}")
-        
-        # Mock article generation
+
+        # Generate outline and article
+        outline = generate_outline(seed_keyword, word_count)
+        content = write_article(outline, tone)
+
         article = {
-            "title": f"{seed_keyword.title()}: Complete Guide (2026)",
-            "content": f"# {seed_keyword.title()}\n\nThis is a sample article about {seed_keyword}...\n\n" * 10,
-            "meta_description": f"Complete guide to {seed_keyword} in 2026.",
+            "title": outline["title"],
+            "content": content,
+            "meta_description": outline["meta_description"],
             "word_count": word_count,
             "seo_score": 92,
             "readability_score": 65,
             "generation_time_seconds": 285,
-            "keywords": [seed_keyword, f"best {seed_keyword}", f"{seed_keyword} guide"]
+            "keywords": research_keywords(seed_keyword),
         }
-        
+
         return jsonify(article)
-        
+
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/v1/stats')
+
+@app.route("/api/v1/stats")
 def get_stats():
     return jsonify({
         "articles_generated_today": 127,
         "average_seo_score": 91.5,
         "average_word_count": 2034,
         "total_words_today": 258318,
-        "revenue_today": "$1,247"
+        "revenue_today": "$1,247",
     })
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
