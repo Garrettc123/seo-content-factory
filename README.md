@@ -7,9 +7,9 @@
 [![Output](https://img.shields.io/badge/Output-50+_posts/day-success.svg)]()
 
 ## 💰 Revenue Model
-- **Agency**: $399/month (50 articles)
-- **Scale**: $799/month (200 articles)
-- **White Label**: $1,999/month (unlimited)
+- **Starter**: $149/month (20 posts/day)
+- **Pro**: $399/month (50 posts/day)
+- **Agency**: $999/month (unlimited)
 - **Target**: $22K MRR
 
 ## 🎯 What It Does
@@ -81,7 +81,9 @@ Turn keyword → published SEO article in 5 minutes:
 
 | Provider | Articles/mo | Price | Cost/Article |
 |----------|-------------|-------|-------------|
-| **Us** | **50** | **$399** | **$8** |
+| **Starter** | **600** | **$149** | **$0.25** |
+| **Pro** | **1,500** | **$399** | **$0.27** |
+| **Agency** | **Unlimited** | **$999** | **Variable** |
 | Jasper | 50 | $499 | $10 |
 | Copy.ai | Unlimited | $499 | Variable |
 | Human Writers | 50 | $5,000 | $100 |
