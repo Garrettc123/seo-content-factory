@@ -1,5 +1,10 @@
 """Tests for the main Flask application endpoints."""
+import os
 from unittest.mock import patch
+
+from tests.conftest import TEST_API_KEY
+
+AUTH = {"X-API-Key": TEST_API_KEY}
 
 
 def test_index(client):
@@ -27,7 +32,7 @@ def test_health(client):
 
 
 def test_generate_missing_keyword(client):
-    resp = client.post("/api/v1/generate", json={})
+    resp = client.post("/api/v1/generate", json={}, headers=AUTH)
     assert resp.status_code == 400
     assert "seed_keyword" in resp.get_json()["error"]
 
@@ -38,6 +43,7 @@ def test_generate_article(client):
         resp = client.post(
             "/api/v1/generate",
             json={"seed_keyword": "python programming", "word_count": 1000},
+            headers=AUTH,
         )
     assert resp.status_code == 200
     data = resp.get_json()
@@ -51,14 +57,14 @@ def test_generate_article(client):
 def test_generate_updates_stats(client):
     mock_content = "# Test\n\nContent."
     with patch("src.app.write_article", return_value=mock_content):
-        client.post("/api/v1/generate", json={"seed_keyword": "seo tips"})
-    stats_resp = client.get("/api/v1/stats")
+        client.post("/api/v1/generate", json={"seed_keyword": "seo tips"}, headers=AUTH)
+    stats_resp = client.get("/api/v1/stats", headers=AUTH)
     stats = stats_resp.get_json()
     assert stats["articles_generated_today"] >= 1
 
 
 def test_stats(client):
-    resp = client.get("/api/v1/stats")
+    resp = client.get("/api/v1/stats", headers=AUTH)
     assert resp.status_code == 200
     data = resp.get_json()
     assert "articles_generated_today" in data
@@ -68,7 +74,7 @@ def test_stats(client):
 
 
 def test_dashboard(client):
-    resp = client.get("/api/v1/dashboard")
+    resp = client.get("/api/v1/dashboard", headers=AUTH)
     assert resp.status_code == 200
     data = resp.get_json()
     assert "posts_generated_today" in data
@@ -95,7 +101,6 @@ def test_subscribe_invalid_plan(client):
 
 
 def test_subscribe_no_stripe_key(client):
-    import os
     with patch.dict(os.environ, {"STRIPE_SECRET_KEY": ""}):
         resp = client.post("/api/v1/subscribe", json={"plan": "pro"})
     assert resp.status_code in (400, 503)
@@ -112,7 +117,7 @@ def test_webhook_bad_signature(client):
 
 
 def test_publish_missing_article(client):
-    resp = client.post("/api/v1/publish", json={"platform": "wordpress"})
+    resp = client.post("/api/v1/publish", json={"platform": "wordpress"}, headers=AUTH)
     assert resp.status_code == 400
 
 
@@ -120,28 +125,29 @@ def test_publish_invalid_platform(client):
     resp = client.post(
         "/api/v1/publish",
         json={"article": {"title": "Test"}, "platform": "medium"},
+        headers=AUTH,
     )
     assert resp.status_code == 400
 
 
 def test_publish_wordpress_missing_credentials(client):
-    import os
     with patch.dict(os.environ, {
         "WORDPRESS_URL": "", "WORDPRESS_USERNAME": "", "WORDPRESS_APP_PASSWORD": ""
     }):
         resp = client.post(
             "/api/v1/publish",
             json={"article": {"title": "Test", "content": "Body"}, "platform": "wordpress"},
+            headers=AUTH,
         )
     assert resp.status_code == 400
 
 
 def test_publish_ghost_missing_credentials(client):
-    import os
     with patch.dict(os.environ, {"GHOST_URL": "", "GHOST_ADMIN_API_KEY": ""}):
         resp = client.post(
             "/api/v1/publish",
             json={"article": {"title": "Test", "content": "Body"}, "platform": "ghost"},
+            headers=AUTH,
         )
     assert resp.status_code == 400
 
@@ -158,6 +164,7 @@ def test_publish_wordpress_success(client):
                 "wp_username": "admin",
                 "wp_app_password": "pass",
             },
+            headers=AUTH,
         )
     assert resp.status_code == 200
     assert resp.get_json()["post_id"] == 42
@@ -174,6 +181,7 @@ def test_publish_ghost_success(client):
                 "ghost_url": "https://myghost.io",
                 "ghost_admin_api_key": "abc123:defsecret0123456789abcdef01234567",
             },
+            headers=AUTH,
         )
     assert resp.status_code == 200
     assert resp.get_json()["platform"] == "ghost"
