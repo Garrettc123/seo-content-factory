@@ -133,13 +133,15 @@ Dashboard: http://localhost:5000
    - Set `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_AGENCY`.
    - Configure webhook endpoint: `https://<your-railway-domain>/api/v1/webhook`
    - Copy webhook signing secret to `STRIPE_WEBHOOK_SECRET`.
-5. In GitHub repo secrets, add `RAILWAY_TOKEN` so `.github/workflows/ci.yml` can deploy on push to `main`.
-6. Push to `main` and verify CI jobs: lint, test, validate-install, deploy.
-7. Run smoke tests on production:
+5. Configure SMTP env vars (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`) so API keys are emailed after successful checkout.
+   - If SMTP is not configured, webhook provisioning still works but email delivery status is reported as skipped.
+6. In GitHub repo secrets, add `RAILWAY_TOKEN` so `.github/workflows/ci.yml` can deploy on push to `main`.
+7. Push to `main` and verify CI jobs: lint, test, validate-install, deploy.
+8. Run smoke tests on production:
    - `GET /health` returns healthy
    - `GET /pricing` loads checkout links
    - Complete Stripe checkout in test mode
-   - Confirm webhook succeeds and API key is provisioned
+   - Confirm webhook succeeds with `api_key_provisioned=true` and `email_delivery_status=sent`
    - Call `POST /api/v1/generate` using `X-API-Key`
 
 ### Optional Local End-to-End (Docker Compose)

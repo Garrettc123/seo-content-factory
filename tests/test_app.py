@@ -116,6 +116,70 @@ def test_webhook_bad_signature(client):
     assert resp.status_code == 400
 
 
+def test_webhook_provisions_key_and_sends_email_status(client):
+    from src.app import _api_keys, _subscriptions
+    _subscriptions.pop("cus_auto_1", None)
+    keys_before = len(_api_keys)
+
+    with patch("src.app.handle_webhook", return_value={
+        "received": True,
+        "type": "checkout.session.completed",
+        "customer_id": "cus_auto_1",
+        "plan": "pro",
+        "customer_email": "buyer@example.com",
+    }), patch("src.app._deliver_api_key_email", return_value={
+        "email_delivery_status": "sent",
+        "email_delivery_reason": "ok",
+    }):
+        resp = client.post(
+            "/api/v1/webhook",
+            data=b"{}",
+            content_type="application/json",
+            headers={"Stripe-Signature": "sig"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["api_key_provisioned"] is True
+    assert data["email_delivery_status"] == "sent"
+    assert len(_api_keys) == keys_before + 1
+    assert _subscriptions["cus_auto_1"]["api_key"].startswith("scf_")
+
+
+def test_webhook_provisioning_is_idempotent(client):
+    from src.app import _api_keys, _subscriptions
+    _subscriptions.pop("cus_auto_2", None)
+
+    with patch("src.app.handle_webhook", return_value={
+        "received": True,
+        "type": "checkout.session.completed",
+        "customer_id": "cus_auto_2",
+        "plan": "starter",
+        "customer_email": "buyer2@example.com",
+    }), patch("src.app._deliver_api_key_email", return_value={
+        "email_delivery_status": "skipped",
+        "email_delivery_reason": "smtp_not_configured",
+    }):
+        first = client.post(
+            "/api/v1/webhook",
+            data=b"{}",
+            content_type="application/json",
+            headers={"Stripe-Signature": "sig"},
+        )
+        key_after_first = _subscriptions["cus_auto_2"]["api_key"]
+        second = client.post(
+            "/api/v1/webhook",
+            data=b"{}",
+            content_type="application/json",
+            headers={"Stripe-Signature": "sig"},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert _subscriptions["cus_auto_2"]["api_key"] == key_after_first
+    assert second.get_json()["email_delivery_status"] == "skipped"
+
+
 def test_publish_missing_article(client):
     resp = client.post("/api/v1/publish", json={"platform": "wordpress"}, headers=AUTH)
     assert resp.status_code == 400

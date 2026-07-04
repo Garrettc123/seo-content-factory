@@ -80,16 +80,21 @@ def handle_webhook(payload: bytes, sig_header: str) -> Dict:
         session = event["data"]["object"]
         customer_id = session.get("customer")
         plan_key = session.get("metadata", {}).get("plan", "pro")
+        customer_email = (
+            session.get("customer_details", {}) or {}
+        ).get("email") or session.get("customer_email")
         subscription_id = session.get("subscription")
         _subscriptions[customer_id] = {
             "plan": plan_key,
             "subscription_id": subscription_id,
             "status": "active",
             "customer_id": customer_id,
+            "customer_email": customer_email,
         }
         # Return these so app.py can provision the API key
         result["customer_id"] = customer_id
         result["plan"] = plan_key
+        result["customer_email"] = customer_email
         logger.info("New subscription: customer=%s plan=%s", customer_id, plan_key)
 
     elif event_type in ("customer.subscription.deleted", "customer.subscription.updated"):

@@ -6,7 +6,9 @@ Revenue Target: $22K/month
 import os
 import logging
 import secrets
+import smtplib
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from functools import wraps
 from typing import Dict, List
 
@@ -91,7 +93,20 @@ def require_api_key(f):
 
 
 def _provision_api_key(customer_id: str, plan: str) -> str:
-    """Create and store a new API key for a customer."""
+    """Create and store (or reuse) an API key for a customer."""
+    existing_key = _subscriptions.get(customer_id, {}).get("api_key")
+    if existing_key and existing_key in _api_keys:
+        _api_keys[existing_key]["plan"] = plan
+        return existing_key
+
+    for key, record in _api_keys.items():
+        if record.get("customer_id") == customer_id:
+            record["plan"] = plan
+            if customer_id not in _subscriptions:
+                _subscriptions[customer_id] = {}
+            _subscriptions[customer_id]["api_key"] = key
+            return key
+
     new_key = "scf_" + secrets.token_urlsafe(32)
     _api_keys[new_key] = {
         "customer_id": customer_id,
@@ -103,6 +118,55 @@ def _provision_api_key(customer_id: str, plan: str) -> str:
     if customer_id in _subscriptions:
         _subscriptions[customer_id]["api_key"] = new_key
     return new_key
+
+
+def _deliver_api_key_email(customer_email: str, api_key: str, plan: str) -> Dict[str, str]:
+    """Send API key delivery email if SMTP configuration is present."""
+    if not customer_email:
+        return {
+            "email_delivery_status": "skipped",
+            "email_delivery_reason": "missing_customer_email",
+        }
+
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_username = os.getenv("SMTP_USERNAME", "")
+    smtp_password = os.getenv("SMTP_PASSWORD", "")
+    smtp_from = os.getenv("SMTP_FROM", "")
+    if not all([smtp_host, smtp_username, smtp_password, smtp_from]):
+        return {
+            "email_delivery_status": "skipped",
+            "email_delivery_reason": "smtp_not_configured",
+        }
+
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() not in {"0", "false", "no"}
+    subject = "Your SEO Content Factory API key"
+    body = (
+        "Welcome to SEO Content Factory.\n\n"
+        f"Plan: {plan}\n"
+        f"API key: {api_key}\n\n"
+        "Use this key in the X-API-Key header for authenticated endpoints."
+    )
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = smtp_from
+    message["To"] = customer_email
+    message.set_content(body)
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+            if smtp_use_tls:
+                smtp.starttls()
+            smtp.login(smtp_username, smtp_password)
+            smtp.send_message(message)
+        return {"email_delivery_status": "sent", "email_delivery_reason": "ok"}
+    except Exception as e:
+        logger.error("API key email delivery failed for %s: %s", customer_email, e)
+        return {
+            "email_delivery_status": "failed",
+            "email_delivery_reason": "smtp_send_failed",
+        }
 
 
 # ── Article generation helpers ───────────────────────────────────────────────
@@ -423,11 +487,19 @@ def stripe_webhook():
     sig_header = request.headers.get("Stripe-Signature", "")
     try:
         result = handle_webhook(payload, sig_header)
+        result["api_key_provisioned"] = False
         # Provision API key on successful checkout
         if result.get("type") == "checkout.session.completed" and result.get("customer_id"):
             cid = result["customer_id"]
             plan = result.get("plan", "starter")
+            customer_email = result.get("customer_email", "")
+            if cid not in _subscriptions:
+                _subscriptions[cid] = {}
+            _subscriptions[cid]["plan"] = plan
+            _subscriptions[cid]["customer_email"] = customer_email
             api_key = _provision_api_key(cid, plan)
+            result["api_key_provisioned"] = True
+            result.update(_deliver_api_key_email(customer_email, api_key, plan))
             logger.info("Provisioned API key for customer %s plan %s", cid, plan)
         return jsonify(result)
     except ValueError as e:
