@@ -121,6 +121,38 @@ python src/app.py
 
 Dashboard: http://localhost:5000
 
+## 🚀 Deploy End-to-End (Railway + Stripe + GitHub Actions)
+
+1. Create a Railway project from this repository.
+2. Add all required environment variables from `.env.example`.
+3. Set production values:
+   - `APP_URL=https://<your-railway-domain>`
+   - `ALLOWED_ORIGINS=https://<your-frontend-domain>`
+4. In Stripe:
+   - Create 3 recurring prices (Starter/Pro/Agency).
+   - Set `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, `STRIPE_PRICE_AGENCY`.
+   - Configure webhook endpoint: `https://<your-railway-domain>/api/v1/webhook`
+   - Copy webhook signing secret to `STRIPE_WEBHOOK_SECRET`.
+5. In GitHub repo secrets, add `RAILWAY_TOKEN` so `.github/workflows/ci.yml` can deploy on push to `main`.
+6. Push to `main` and verify CI jobs: lint, test, validate-install, deploy.
+7. Run smoke tests on production:
+   - `GET /health` returns healthy
+   - `GET /pricing` loads checkout links
+   - Complete Stripe checkout in test mode
+   - Confirm webhook succeeds and API key is provisioned
+   - Call `POST /api/v1/generate` using `X-API-Key`
+
+### Optional Local End-to-End (Docker Compose)
+
+```bash
+docker compose up --build
+```
+
+This starts:
+- `web` on `http://localhost:5000`
+- `redis` on `localhost:6379`
+- `worker` (`celery -A src.worker worker --loglevel=info`)
+
 ## 📈 Revenue Projections
 
 | Month | Customers | MRR | ARR |
